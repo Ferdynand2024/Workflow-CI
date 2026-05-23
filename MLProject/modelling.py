@@ -85,7 +85,15 @@ def run():
 
     mlflow.set_experiment(EXPERIMENT_NAME)
     mlflow.sklearn.autolog(disable=True)
-    
+
+    # Hapus env var MLFLOW_RUN_ID jika ada agar tidak resume run lama
+    # yang tidak ada di database runner GitHub Actions (penyebab error "Run not found")
+    os.environ.pop("MLFLOW_RUN_ID", None)
+
+    # Pastikan tidak ada active run yang menggantung sebelumnya
+    if mlflow.active_run():
+        mlflow.end_run()
+
     with mlflow.start_run(run_name="CI_CBR_KNN_Run"):
 
         # Train model
