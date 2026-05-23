@@ -1,0 +1,106 @@
+name: CI - CBR Disease Prediction
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:   # bisa dijalankan manual dari tab Actions di GitHub
+
+jobs:
+  train-model:
+    runs-on: ubuntu-latest
+
+    steps:
+      # -------------------------------------------------------
+      # 1. Checkout repository
+      # -------------------------------------------------------
+      - name: Run actions/checkout@v3
+        uses: actions/checkout@v3
+
+      # -------------------------------------------------------
+      # 2. Setup Python 3.12.7
+      # -------------------------------------------------------
+      - name: Set up Python 3.12.7
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12.7"
+
+      # -------------------------------------------------------
+      # 3. Cek environment
+      # -------------------------------------------------------
+      - name: Check Env
+        run: |
+          python --version
+          pip --version
+          echo "Working directory: $(pwd)"
+          ls -la
+
+      # -------------------------------------------------------
+      # 4. Install dependencies
+      # -------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas==2.2.3 numpy==1.26.4 scikit-learn==1.5.2 \
+                      mlflow==2.19.0 matplotlib==3.9.2 seaborn==0.13.2
+
+      # -------------------------------------------------------
+      # 5. Set MLflow Tracking URI (lokal di runner)
+      # -------------------------------------------------------
+      - name: Set MLflow Tracking URI
+        run: |
+          echo "MLFLOW_TRACKING_URI=sqlite:///mlflow.db" >> $GITHUB_ENV
+
+      # -------------------------------------------------------
+      # 6. Jalankan MLflow Project (PERBAIKAN: gunakan mlflow run)
+      # -------------------------------------------------------
+      - name: Run MLflow Project
+        env:
+          MLFLOW_TRACKING_URI: sqlite:///mlflow.db
+        run: |
+          mlflow run MLProject \
+            --env-manager=local \
+            -P n_neighbors=3 \
+            -P metric=euclidean \
+            -P weights=uniform
+
+      # -------------------------------------------------------
+      # 7. Ambil MLflow run_id terbaru
+      # -------------------------------------------------------
+      - name: Get latest MLflow run_id
+        run: |
+          # Cari file latest_run_id.txt baik di root maupun di folder MLProject
+          if [ -f "latest_run_id.txt" ]; then
+            RUN_ID=$(cat latest_run_id.txt)
+          else
+            RUN_ID=$(cat MLProject/latest_run_id.txt)
+          fi
+          echo "Latest MLflow Run ID: $RUN_ID"
+          echo "MLFLOW_RUN_ID=$RUN_ID" >> $GITHUB_ENV
+
+      # -------------------------------------------------------
+      # 8. Install dependencies untuk upload
+      # -------------------------------------------------------
+      - name: Install Python dependencies
+        run: |
+          pip install requests
+
+      # -------------------------------------------------------
+      # 9. Upload artifact ke GitHub (commit mlruns ke repo)
+      # -------------------------------------------------------
+      - name: Upload to GitHub
+        run: |
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Tambahkan mlruns dan hasil run ke repo
+          mkdir -p artifacts
+          cp -r mlruns artifacts/ 2>/dev/null || true
+          cp MLProject/latest_run_id.txt artifacts/ 2>/dev/null || true
+          cp MLProject/confusion_matrix.png artifacts/ 2>/dev/null || true
+          
+          git add artifacts/
+          git diff --staged --quiet || git commit -m "CI: Upload MLflow artifacts - Run ${{ env.MLFLOW_RUN_ID }}"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
